@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>小蜜蜂 SPACE BEES</title>
+<meta name="description" content="經典街機風格小蜜蜂射擊遊戲,支援鍵盤與觸控操作。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#05050d;
+  --panel:#0a0a14;
+  --honey:#f5a623;
+  --mint:#5dcaa5;
+  --coral:#f09595;
+  --dim:#6b6b80;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  background:var(--ink);
+  color:#fff;
+  font-family:'Press Start 2P',monospace;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  min-height:100vh;
+  padding:12px;
+  overflow:hidden;
+}
+.cabinet{
+  width:100%;
+  max-width:660px;
+  background:var(--panel);
+  border:3px solid #1c1c2e;
+  border-radius:14px;
+  padding:14px;
+  position:relative;
+}
+.marquee{
+  text-align:center;
+  padding:6px 0 14px;
+  letter-spacing:2px;
+}
+.marquee .zh{font-size:clamp(16px,4.5vw,24px);color:var(--honey);text-shadow:0 0 12px rgba(245,166,35,.5);}
+.marquee .en{font-size:clamp(8px,2vw,10px);color:var(--mint);margin-top:8px;letter-spacing:6px;}
+.hud{
+  display:flex;
+  justify-content:space-between;
+  font-size:clamp(8px,2.2vw,11px);
+  color:var(--mint);
+  padding:0 4px 10px;
+}
+.hud .lives{color:var(--coral);}
+.screen{
+  position:relative;
+  border-radius:8px;
+  overflow:hidden;
+  background:#020208;
+  border:2px solid #1c1c2e;
+}
+canvas{display:block;width:100%;touch-action:none;image-rendering:pixelated;}
+.scanlines{
+  position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px);
+  mix-blend-mode:multiply;
+}
+.controls{
+  display:flex;gap:10px;justify-content:center;padding-top:14px;
+}
+.controls button{
+  font-family:inherit;
+  font-size:clamp(9px,2.5vw,12px);
+  color:var(--mint);
+  background:#10101e;
+  border:2px solid #26263d;
+  border-bottom-width:5px;
+  border-radius:10px;
+  padding:16px 0;
+  flex:1;
+  max-width:140px;
+  cursor:pointer;
+  -webkit-user-select:none;user-select:none;
+  -webkit-tap-highlight-color:transparent;
+  transition:transform .05s;
+}
+.controls button:active{transform:translateY(3px);border-bottom-width:2px;}
+.controls .fire{color:var(--coral);flex:1.4;max-width:190px;}
+.hint{
+  text-align:center;
+  font-size:clamp(7px,1.8vw,9px);
+  color:var(--dim);
+  padding-top:14px;
+  line-height:2;
+}
+.mute{
+  position:absolute;top:14px;right:14px;
+  background:none;border:none;color:var(--dim);
+  font-family:inherit;font-size:9px;cursor:pointer;padding:6px;
+}
+@media (prefers-reduced-motion: reduce){
+  .controls button{transition:none;}
+}
+@media (min-width:700px){
+  .controls{display:none;}
+  .hint .touch{display:none;}
+}
+@media (max-width:699px){
+  .hint .kb{display:none;}
+}
+</style>
+</head>
+<body>
+<main class="cabinet">
+  <div class="marquee">
+    <div class="zh">小 蜜 蜂</div>
+    <div class="en">SPACE BEES</div>
+  </div>
+  <button class="mute" id="mute" aria-label="切換音效">音效:開</button>
+  <div class="hud">
+    <span>SCORE <span id="score">0</span></span>
+    <span>HI <span id="hi">0</span></span>
+    <span class="lives" id="lives">♥♥♥</span>
+  </div>
+  <div class="screen">
+    <canvas id="game" width="600" height="540" aria-label="小蜜蜂遊戲畫面"></canvas>
+    <div class="scanlines"></div>
+  </div>
+  <div class="controls">
+    <button id="btnL" aria-label="向左移動">◀</button>
+    <button id="btnFire" class="fire" aria-label="發射">發射</button>
+    <button id="btnR" aria-label="向右移動">▶</button>
+  </div>
+  <p class="hint">
+    <span class="kb">← → 移動 · 空白鍵射擊 · 點畫面開始</span>
+    <span class="touch">按住下方按鈕操作 · 點畫面開始</span>
+  </p>
+</main>
+<script>
+(function(){
+"use strict";
+const cv=document.getElementById('game'),cx=cv.getContext('2d');
+const W=600,H=540;
+let state='title',score=0,lives=3,level=1,frame=0;
+let hi=0;
+try{hi=parseInt(localStorage.getItem('spaceBeesHi')||'0',10)||0;}catch(e){}
+let px=W/2,keys={l:false,r:false,f:false},fireCool=0;
+let pBullets=[],eBullets=[],parts=[],inv=[],shields=[];
+let invDir=1,invSpeed=0.32;
+let ufo=null,ufoTimer=600;
+let soundOn=true;
+
+const BEE =[[0,1,0,0,1,0],[1,0,1,1,0,1],[1,1,1,1,1,1],[1,1,0,0,1,1],[1,1,1,1,1,1],[0,1,0,0,1,0]];
+const BEE2=[[0,1,0,0,1,0],[0,0,1,1,0,0],[1,1,1,1,1,1],[1,1,0,0,1,1],[1,1,1,1,1,1],[1,0,0,0,0,1]];
+const UFO =[[0,0,1,1,1,1,0,0],[0,1,1,1,1,1,1,0],[1,1,0,1,1,0,1,1],[0,1,1,1,1,1,1,0]];
+const ROWS=5,COLS=10,CW=44,CH=36;
+const rowColors=['#f09595','#f5a623','#f5a623','#5dcaa5','#5dcaa5'];
+
+let ac=null;
+function beep(f,d,type){
+  if(!soundOn)return;
+  try{
+    if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();
+    const o=ac.createOscillator(),g=ac.createGain();
+    o.type=type||'square';o.frequency.value=f;
+    g.gain.value=0.045;
+    o.connect(g);g.connect(ac.destination);
+    o.start();
+    g.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+d);
+    o.stop(ac.currentTime+d);
+  }catch(e){}
+}
+
+function makeShields(){
+  shields=[];
+  for(let s=0;s<4;s++){
+    const bx=70+s*130;
+    for(let r=0;r<3;r++)for(let c=0;c<6;c++){
+      if(r===2&&c>1&&c<4)continue;
+      shields.push({x:bx+c*8,y:430+r*8,hp:2});
+    }
+  }
+}
+function makeWave(){
+  inv=[];
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)
+    inv.push({c,r,x:60+c*CW,y:60+r*CH,alive:true});
+  invDir=1;
+  invSpeed=0.32+level*0.08;
+  pBullets=[];eBullets=[];
+  ufo=null;ufoTimer=600+Math.random()*600;
+}
+function reset(){score=0;lives=3;level=1;px=W/2;makeWave();makeShields();}
+function boom(x,y,col,n){
+  for(let i=0;i<n;i++)parts.push({x,y,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4,life:24,col});
+}
+function saveHi(){
+  if(score>hi){hi=score;try{localStorage.setItem('spaceBeesHi',String(hi));}catch(e){}}
+}
+function drawSprite(m,x,y,s,col){
+  cx.fillStyle=col;
+  for(let r=0;r<m.length;r++)for(let c=0;c<m[r].length;c++)
+    if(m[r][c])cx.fillRect(x+c*s,y+r*s,s,s);
+}
+function drawPlayer(){
+  cx.fillStyle='#5dcaa5';
+  cx.fillRect(px-16,498,32,8);
+  cx.fillRect(px-12,492,24,6);
+  cx.fillRect(px-3,484,6,8);
+}
+
+function update(){
+  frame++;
+  if(state!=='play')return;
+  let pv=0;
+  if(keys.l)pv=-5;
+  if(keys.r)pv=5;
+  px=Math.max(20,Math.min(W-20,px+pv));
+  if(fireCool>0)fireCool--;
+  if(keys.f&&fireCool===0&&pBullets.length<2){
+    pBullets.push({x:px,y:480});fireCool=16;beep(880,0.07);
+  }
+  const alive=inv.filter(i=>i.alive);
+  if(alive.length===0){level++;makeWave();makeShields();return;}
+
+  const sp=invSpeed*(1+(1-alive.length/(ROWS*COLS))*2.2);
+  let hitEdge=false;
+  alive.forEach(i=>{i.x+=invDir*sp;if(i.x<28||i.x>W-52)hitEdge=true;});
+  if(hitEdge){
+    invDir*=-1;
+    alive.forEach(i=>{i.y+=14;if(i.y>442){state='over';saveHi();}});
+  }
+  if(Math.random()<0.012+level*0.004){
+    const shooters={};
+    alive.forEach(i=>{if(!shooters[i.c]||i.y>shooters[i.c].y)shooters[i.c]=i;});
+    const arr=Object.values(shooters);
+    const s=arr[Math.floor(Math.random()*arr.length)];
+    eBullets.push({x:s.x+12,y:s.y+24});
+  }
+
+  ufoTimer--;
+  if(ufoTimer<=0&&!ufo){
+    ufo={x:-40,y:34};
+    ufoTimer=900+Math.random()*900;
+  }
+  if(ufo){
+    ufo.x+=2.4;
+    if(frame%14===0)beep(520+(frame%28===0?80:0),0.05,'triangle');
+    if(ufo.x>W+40)ufo=null;
+  }
+
+  pBullets.forEach(b=>b.y-=9);
+  eBullets.forEach(b=>b.y+=3.2+level*0.3);
+  pBullets=pBullets.filter(b=>b.y>-10);
+  eBullets=eBullets.filter(b=>b.y<H+10);
+
+  pBullets.forEach(b=>{
+    for(const i of inv){
+      if(i.alive&&b.x>i.x-2&&b.x<i.x+26&&b.y>i.y-2&&b.y<i.y+26){
+        i.alive=false;b.y=-99;
+        score+=(5-i.r)*10+10;
+        boom(i.x+12,i.y+12,rowColors[i.r],10);
+        beep(220,0.12);
+        break;
+      }
+    }
+    if(ufo&&b.x>ufo.x-4&&b.x<ufo.x+36&&b.y>ufo.y-4&&b.y<ufo.y+20){
+      score+=150;
+      boom(ufo.x+16,ufo.y+8,'#f09595',18);
+      beep(990,0.2);beep(660,0.25);
+      ufo=null;b.y=-99;
+    }
+    for(const s of shields){
+      if(s.hp>0&&b.x>s.x&&b.x<s.x+8&&b.y>s.y&&b.y<s.y+8){s.hp--;b.y=-99;break;}
+    }
+  });
+
+  eBullets.forEach(b=>{
+    if(b.x>px-16&&b.x<px+16&&b.y>482&&b.y<506){
+      b.y=H+99;lives--;
+      boom(px,495,'#5dcaa5',16);
+      beep(110,0.3,'sawtooth');
+      if(lives<=0){state='over';saveHi();}
+    }
+    for(const s of shields){
+      if(s.hp>0&&b.x>s.x&&b.x<s.x+8&&b.y>s.y&&b.y<s.y+8){s.hp--;b.y=H+99;break;}
+    }
+  });
+
+  parts.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.life--;});
+  parts=parts.filter(p=>p.life>0);
+  saveHi();
+}
+
+function draw(){
+  cx.clearRect(0,0,W,H);
+  cx.fillStyle='rgba(255,255,255,0.25)';
+  for(let i=0;i<30;i++){
+    cx.fillRect((i*97+frame*0.1*(i%3+1))%W,(i*53)%H,2,2);
+  }
+  if(state==='title'){
+    cx.fillStyle='#f5a623';cx.font='bold 40px monospace';cx.textAlign='center';
+    cx.fillText('小 蜜 蜂',W/2,180);
+    cx.fillStyle='#5dcaa5';cx.font='14px monospace';
+    cx.fillText('S P A C E   B E E S',W/2,212);
+    drawSprite(frame%60<30?BEE:BEE2,W/2-18,256,6,'#f5a623');
+    cx.fillStyle='#888';cx.font='13px monospace';
+    cx.fillText('蜜蜂 10-50 分 · 神秘飛船 150 分',W/2,340);
+    cx.fillStyle='#fff';cx.font='16px monospace';
+    if(frame%60<40)cx.fillText('點擊畫面或按空白鍵開始',W/2,392);
+    return;
+  }
+  if(ufo)drawSprite(UFO,ufo.x,ufo.y,4,'#f09595');
+  inv.forEach(i=>{if(i.alive)drawSprite(frame%50<25?BEE:BEE2,i.x,i.y,4,rowColors[i.r]);});
+  shields.forEach(s=>{
+    if(s.hp>0){cx.fillStyle=s.hp===2?'#1d9e75':'#0f6e56';cx.fillRect(s.x,s.y,8,8);}
+  });
+  cx.fillStyle='#fff';
+  pBullets.forEach(b=>cx.fillRect(b.x-2,b.y,4,10));
+  cx.fillStyle='#f09595';
+  eBullets.forEach(b=>{cx.fillRect(b.x-2,b.y,4,4);cx.fillRect(b.x-2,b.y+6,4,4);});
+  parts.forEach(p=>{
+    cx.fillStyle=p.col;cx.globalAlpha=p.life/24;
+    cx.fillRect(p.x,p.y,3,3);cx.globalAlpha=1;
+  });
+  if(state!=='over'||frame%30<15)drawPlayer();
+  cx.fillStyle='#5dcaa5';cx.fillRect(0,516,W,2);
+  cx.fillStyle='#888';cx.font='12px monospace';cx.textAlign='left';
+  cx.fillText('LEVEL '+level,10,533);
+  if(state==='over'){
+    cx.fillStyle='rgba(2,2,8,0.78)';cx.fillRect(0,0,W,H);
+    cx.textAlign='center';
+    cx.fillStyle='#f09595';cx.font='bold 36px monospace';
+    cx.fillText('GAME OVER',W/2,230);
+    cx.fillStyle='#fff';cx.font='16px monospace';
+    cx.fillText('得分 '+score,W/2,272);
+    if(score>=hi&&score>0){
+      cx.fillStyle='#f5a623';
+      cx.fillText('★ 新紀錄! ★',W/2,304);
+    }
+    cx.fillStyle='#fff';
+    if(frame%60<40)cx.fillText('點擊畫面再玩一次',W/2,360);
+  }
+  document.getElementById('score').textContent=score;
+  document.getElementById('hi').textContent=hi;
+  document.getElementById('lives').textContent='♥'.repeat(Math.max(0,lives));
+}
+
+function loop(){update();draw();requestAnimationFrame(loop);}
+function start(){
+  if(state==='title'||state==='over'){reset();state='play';beep(660,0.1);}
+}
+
+document.addEventListener('keydown',e=>{
+  if(['ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();
+  if(e.key==='ArrowLeft')keys.l=true;
+  if(e.key==='ArrowRight')keys.r=true;
+  if(e.key===' '){if(state!=='play')start();else keys.f=true;}
+});
+document.addEventListener('keyup',e=>{
+  if(e.key==='ArrowLeft')keys.l=false;
+  if(e.key==='ArrowRight')keys.r=false;
+  if(e.key===' ')keys.f=false;
+});
+cv.addEventListener('pointerdown',()=>{if(state!=='play')start();});
+
+function hold(id,key){
+  const el=document.getElementById(id);
+  el.addEventListener('pointerdown',e=>{
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    if(state!=='play')start();
+    keys[key]=true;
+  });
+  ['pointerup','pointercancel'].forEach(ev=>el.addEventListener(ev,()=>{keys[key]=false;}));
+  el.addEventListener('contextmenu',e=>e.preventDefault());
+}
+hold('btnL','l');hold('btnR','r');hold('btnFire','f');
+
+document.getElementById('mute').addEventListener('click',function(){
+  soundOn=!soundOn;
+  this.textContent=soundOn?'音效:開':'音效:關';
+});
+
+loop();
+})();
+</script>
+</body>
+</html>
